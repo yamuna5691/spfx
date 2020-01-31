@@ -1,0 +1,78 @@
+parameters:
+  # unique name of the job
+  job_name: run_tests
+  # friendly name of the job
+  display_name: Execute tests
+  # agent pool details (default: MSFT hosted Ubuntu)
+  pool: 
+    vmImage: ubuntu-latest
+  # relative path to the project root if not in root of repo
+  working_directory: ''
+  # package manager
+  package_manager: 'npm'
+
+jobs:
+- job: ${{ parameters.job_name }}
+  displayName: ${{ parameters.display_name }}
+  pool:
+    vmImage: ubuntu-latest
+  steps:
+  ##########################################
+  ## install dependencies using specified 
+  ##    package manager
+  ##########################################
+  - script: npm install
+    displayName: Install dependencies (with NPM)
+    workingDirectory: ${{ parameters.working_directory }}
+    condition: eq('${{ parameters.package_manager }}', 'npm')
+  - script: yarn install --frozen-lockfile
+    displayName: Install dependencies (with Yarn)
+    workingDirectory: ${{ parameters.working_directory }}
+    condition: eq('${{ parameters.package_manager }}', 'yarn')
+  - script: pnpm install --shamefully-flatten
+    displayName: Install dependencies (with PNPM)
+    workingDirectory: ${{ parameters.working_directory }}
+    condition: eq('${{ parameters.package_manager }}', 'pnpm')
+  ##########################################
+  ## execute: gulp build
+  ##########################################
+  - task: Gulp@0
+    displayName: SPFx build
+    inputs:
+      gulpFile: $(Build.Repository.LocalPath)/${{ parameters.working_directory }}/gulpfile.js
+      targets: build
+  ##########################################
+  ## execute tests
+  ##########################################
+  - script: npm test
+    displayName: Run unit tests from test script (with NPM)
+    workingDirectory: ${{ parameters.working_directory }}
+    condition: eq('${{ parameters.package_manager }}', 'npm')
+    continueOnError: true
+  - script: yarn run test
+    displayName: Run unit tests from test script (with Yarn)
+    workingDirectory: ${{ parameters.working_directory }}
+    condition: eq('${{ parameters.package_manager }}', 'yarn')
+    continueOnError: true
+  - script: pnpm test
+    displayName: Run unit tests from test script (with PNPM)
+    workingDirectory: ${{ parameters.working_directory }}
+    condition: eq('${{ parameters.package_manager }}', 'pnpm')
+    continueOnError: true
+  ##########################################
+  ## publish code coverage results to devops pipeline run
+  ##########################################
+  - task: PublishCodeCoverageResults@1
+    displayName: Publish code coverage results
+    inputs:
+      codeCoverageTool: cobertura
+      summaryFileLocation: '$(System.DefaultWorkingDirectory)/**/*coverage.xml'
+  ##########################################
+  ## publish junit test results to devops pipeline run
+  ##########################################
+  - task: PublishTestResults@2
+    displayName: Publish test results
+    inputs:
+      testResultsFormat: JUnit
+      testResultsFiles: '**/junit.xml'
+      failTaskOnFailedTests: true

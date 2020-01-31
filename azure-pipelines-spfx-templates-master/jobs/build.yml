@@ -1,0 +1,76 @@
+parameters:
+  # unique name of the job
+  job_name: build_package
+  # friendly name of the job
+  display_name: SPFx production build & packaging
+  # agent pool details (default: MSFT hosted Ubuntu)
+  pool: 
+    vmImage: ubuntu-latest
+  # relative path to the project root if not in root of repo
+  working_directory: ''
+  # package manager
+  package_manager: 'npm'
+
+jobs:
+- job: ${{ parameters.job_name }}
+  displayName: ${{ parameters.display_name }}
+  pool: ${{ parameters.pool }}
+  steps:
+  ##########################################
+  ## install dependencies using specified 
+  ##    package manager
+  ##########################################
+  - script: npm install
+    displayName: Install dependencies (NPM)
+    workingDirectory: ${{ parameters.working_directory }}
+    condition: eq('${{ parameters.package_manager }}', 'npm')
+  - script: yarn install --frozen-lockfile
+    displayName: Install dependencies (Yarn)
+    workingDirectory: ${{ parameters.working_directory }}
+    condition: eq('${{ parameters.package_manager }}', 'yarn')
+  - script: pnpm install --shamefully-flatten
+    displayName: Install dependencies (with PNPM)
+    workingDirectory: ${{ parameters.working_directory }}
+    condition: eq('${{ parameters.package_manager }}', 'pnpm')
+  ##########################################
+  ## execute: gulp build
+  ##########################################
+  - task: Gulp@0
+    displayName: SPFx build
+    inputs:
+      gulpFile: $(Build.Repository.LocalPath)/${{ parameters.working_directory }}/gulpfile.js
+      targets: build
+  ##########################################
+  ## execute: gulp bundle --ship
+  ##########################################
+  - task: Gulp@0
+    displayName: SPFx bundle (production)
+    inputs:
+      gulpFile: $(Build.Repository.LocalPath)/${{ parameters.working_directory }}/gulpfile.js
+      targets: bundle
+      arguments: --ship
+  ##########################################
+  ## execute: gulp package-solution --ship
+  ##########################################
+  - task: Gulp@0
+    displayName: SPFx package solution (production)
+    inputs:
+      gulpFile: $(Build.Repository.LocalPath)/${{ parameters.working_directory }}/gulpfile.js
+      targets: package-solution
+      arguments: --ship
+  ##########################################
+  ## determine name of generated *.sppkg
+  ##########################################
+  - script: |
+      CMD_GET_SPPKG_NAME=$(find . -name '*.sppkg' -exec basename {} \;)
+      echo "##vso[task.setvariable variable=SpPkgFileName;isOutput=true]${CMD_GET_SPPKG_NAME}"
+    displayName: Get generated *.sppkg filename
+    name: GetSharePointPackage
+  ##########################################
+  ## publish *.sppkg as build artifact
+  ##########################################
+  - task: PublishPipelineArtifact@1
+    displayName: Publish SharePoint package (*.sppkg)
+    inputs:
+      targetPath: $(Build.Repository.LocalPath)/${{ parameters.working_directory }}/sharepoint/solution/$(GetSharePointPackage.SpPkgFileName)
+      artifact: spfx-package
